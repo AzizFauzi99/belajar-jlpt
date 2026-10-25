@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1792914190205,
+      "tag": "0000_dark_vector",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792936217276,
+      "tag": "0001_furry_harpoon",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792946688930,
+      "tag": "0002_dashing_marvel_boy",
+      "breakpoints": true
+    }
+  ]
+}
