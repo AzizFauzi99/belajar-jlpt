@@ -7,7 +7,7 @@ Next.js 15 + SQLite (Drizzle ORM) + FSRS (spaced repetition). Semua data tersimp
 
 | Skill | Jumlah | Halaman |
 |---|---|---|
-| Kana (hiragana + katakana) | 142 | `/kana`, latihan `/study?focus=kana` |
+| Kana (hiragana + katakana) | 142 karakter + 176 kata nyata | `/kana`, latihan `/study?focus=kana` |
 | Kosakata | 935 kata | `/vocab`, latihan `/study?focus=vocab` |
 | Kanji | 106 kanji | `/kanji`, latihan `/study?focus=kanji` |
 | Tata bahasa | 80 pola | `/grammar`, latihan `/study?focus=grammar` |
@@ -23,7 +23,7 @@ Konten ada di `src/content/` dan di-seed ke SQLite. Semua data konten bisa diper
 npm install
 npm run seed       # buat data/app.db, migrasi, seed semua konten, user default
 npm run dev        # http://localhost:3000
-npm test           # 34 tes
+npm test           # 42 tes
 npm run typecheck
 npm run build
 ```
@@ -37,13 +37,17 @@ Jika sudah punya `data/app.db` dari versi lama, jalankan `npm run seed` lagi. Mi
 - Soal dibuat otomatis: ketik romaji (kana), pilih arti/cara baca (kosakata, kanji), isian cloze (tata bahasa).
 - Kartu baru menampilkan detail lengkap + audio TTS sebelum dites.
 - Mode fokus per skill lewat `/study?focus=vocab` (dan tombol di halaman).
+- Deck kana punya pilihan `all`, `hiragana`, `katakana`, dan `word` (kata nyata), mis. `/study?focus=kana&deck=word`.
+- Kartu kana **tidak pernah habis**: setelah semua kartu diperkenalkan, kartu yang sudah dilihat diulang terus sebagai review (`kind: drill`).
+- Latihan kata nyata mengetik romaji kata Jepang asli (mis. コーヒー → koohii); jawaban menerima variasi vokal panjang dan ejaan Kunrei.
 - Tombol audio memakai Web Speech API (suara Jepang perangkat).
 
 ### Tempo mengikuti pengguna (tanpa batas harian)
 Urutan pengambilan kartu (`src/lib/next.ts`):
 1. **Jatuh tempo dulu:** learning/relearning, lalu review dengan retrievability terendah.
 2. **Antrean kosong + gerbang terbuka:** kartu baru, batch kecil (5).
-3. **Selain itu:** layar jeda; pengguna bisa memaksa **Tambah kartu baru** atau **Latihan ekstra**.
+3. **Deck kana:** ulangi kartu yang sudah dilihat, tanpa layar jeda.
+4. **Selain itu:** layar jeda; pengguna bisa memaksa **Tambah kartu baru** atau **Latihan ekstra**.
 
 **Gerbang adaptif:** kartu baru ditahan jika kartu "rapuh" (stabilitas < 7 hari) melewati batas lunak.
 - Dasar: santai 20, normal 30, ngebut 50.
@@ -94,7 +98,7 @@ src/app/              halaman & API route
 ```
 
 ### API
-- `GET /api/next?mode=auto|new|ahead&focus=kana|vocab|kanji|grammar`
+- `GET /api/next?mode=auto|new|ahead|drill&focus=kana|vocab|kanji|grammar&deck=all|hiragana|katakana|word`
 - `POST /api/review` — simpan satu review FSRS
 - `GET /api/exam` — susun paket ujian baru
 - `POST /api/exam` — simpan hasil ujian

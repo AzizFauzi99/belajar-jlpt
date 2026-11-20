@@ -1,6 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { Rating } from 'ts-fsrs';
-import { checkRomaji, ratingFor } from './answer';
+import { checkRomaji, checkWordRomaji, ratingFor } from './answer';
+
+describe('checkWordRomaji', () => {
+  it('menerima variasi vokal panjang, macron, dan ejaan Kunrei', () => {
+    expect(checkWordRomaji('koohii', 'koohii')).toBe(true);
+    expect(checkWordRomaji('kōhī', 'koohii')).toBe(true);
+    expect(checkWordRomaji('kohi', 'koohii')).toBe(true);
+    expect(checkWordRomaji('sinbun', 'shinbun')).toBe(true);
+    expect(checkWordRomaji('shimbun', 'shinbun')).toBe(true);
+    expect(checkWordRomaji('tokyo', 'toukyou')).toBe(true);
+    expect(checkWordRomaji('gakko', 'gakkou')).toBe(true);
+  });
+
+  it('menolak bacaan yang berbeda', () => {
+    expect(checkWordRomaji('neko', 'inu')).toBe(false);
+    expect(checkWordRomaji('kite', 'kitte')).toBe(false);
+  });
+});
 
 describe('checkRomaji', () => {
   it('menerima jawaban persis, huruf besar, dan spasi', () => {

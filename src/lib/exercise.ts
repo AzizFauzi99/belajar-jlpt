@@ -10,6 +10,8 @@ export type Exercise = {
   answer: string;
   options: string[];
   hint?: string;
+  /** Jawaban romaji kata utuh: terima variasi vokal panjang & ejaan Kunrei. */
+  loose?: boolean;
 };
 
 export type PoolItem = { id: number; type: string; data: Record<string, unknown> };
@@ -46,6 +48,18 @@ export function buildExercise(item: PoolItem, pool: PoolItem[]): Exercise {
   const seed = `${item.type}:${item.id}`;
 
   if (item.type === 'kana') {
+    // Kartu "kata nyata": baca kata Jepang utuh, bukan satu karakter.
+    if (data.kind === 'word') {
+      return {
+        kind: 'typing',
+        prompt: String(data.word ?? ''),
+        promptSub: `Baca kata ini · ${String(data.script ?? 'kana')}`,
+        answer: String(data.romaji ?? ''),
+        options: [],
+        hint: String(data.meaning ?? ''),
+        loose: true,
+      };
+    }
     return {
       kind: 'typing',
       prompt: String(data.char ?? ''),

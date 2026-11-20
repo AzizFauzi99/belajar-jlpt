@@ -2,6 +2,7 @@ import { and, eq } from 'drizzle-orm';
 import { createDb } from '../src/db/client';
 import { itemTags, items, settings, tags, users } from '../src/db/schema';
 import { KANA_GROUPS, toKatakana } from '../src/content/kana';
+import { KANA_WORDS } from '../src/content/kana-words';
 import { vocabEntries } from '../src/content/vocab';
 import { kanjiEntries } from '../src/content/kanji';
 import { grammarEntries } from '../src/content/grammar';
@@ -64,6 +65,32 @@ for (const script of ['hiragana', 'katakana'] as const) {
       }
       counts.kana = (counts.kana ?? 0) + 1;
     });
+  }
+}
+
+// ---------- Kata nyata dalam kana ----------
+// Disimpan sebagai item bertipe 'kana' dengan data.kind = 'word', sehingga
+// ikut deck kana tetapi tidak tampil sebagai karakter di halaman /kana.
+{
+  let i = 0;
+  for (const w of KANA_WORDS) {
+    i += 1;
+    const key = `word:${w.word}`;
+    upsert(
+      'kana',
+      key,
+      {
+        kind: 'word',
+        script: w.script,
+        word: w.word,
+        romaji: w.romaji,
+        meaning: w.meaning,
+        category: w.category,
+      },
+      500 + i,
+      [`script:${w.script}`, 'kana-group:word', `kana-word:${w.category}`],
+    );
+    counts['kana-word'] = (counts['kana-word'] ?? 0) + 1;
   }
 }
 

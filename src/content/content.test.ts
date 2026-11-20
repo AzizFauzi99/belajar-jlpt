@@ -4,6 +4,22 @@ import { kanjiEntries } from './kanji';
 import { grammarEntries } from './grammar';
 import { READING_PASSAGES } from './reading';
 import { LISTENING_TRACKS } from './listening';
+import { KANA_WORDS } from './kana-words';
+
+describe('kata nyata dalam kana', () => {
+  it('berisi 100+ kata kana asli dengan romaji dan arti', () => {
+    expect(KANA_WORDS.length).toBeGreaterThanOrEqual(100);
+    const words = KANA_WORDS.map((w) => w.word);
+    expect(new Set(words).size).toBe(words.length);
+    for (const w of KANA_WORDS) {
+      expect(w.romaji).toMatch(/^[a-z]+$/);
+      expect(w.meaning.length).toBeGreaterThan(0);
+      expect(w.category.length).toBeGreaterThan(0);
+      if (w.script === 'hiragana') expect(w.word).toMatch(/^[ぁ-ゖ]+$/);
+      else expect(w.word).toMatch(/^[ァ-ヺー]+$/);
+    }
+  });
+});
 
 describe('integritas konten N5', () => {
   it('menyediakan sekitar 800 kosakata unik', () => {

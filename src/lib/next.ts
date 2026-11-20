@@ -13,8 +13,13 @@ import {
 import { buildExercise, type Exercise, type PoolItem, type StudyType } from './exercise';
 import { retrievability } from './srs';
 
-export type Mode = 'auto' | 'new' | 'ahead';
+export type Mode = 'auto' | 'new' | 'ahead' | 'drill';
 type ItemType = StudyType;
+
+/** Sub-deck kana. `all` mencampur hiragana, katakana, dan kata nyata. */
+export type KanaDeck = 'all' | 'hiragana' | 'katakana' | 'word';
+
+type ItemLite = { id: number; type: string; data: Record<string, unknown> };
 
 export type BatchCard = {
   itemId: number;
@@ -56,7 +61,13 @@ export function unlockedTypes(db: Db, userId: number): ItemType[] {
   return unlocked;
 }
 
-function selectNew(db: Db, userId: number, types: ItemType[], limit: number) {
+function selectNew(
+  db: Db,
+  userId: number,
+  types: ItemType[],
+  limit: number,
+  match: ((it: ItemLite) => boolean) | null = null,
+) {
   if (limit <= 0 || types.length === 0) return [];
   return db
     .select({ item: items })
@@ -64,9 +75,20 @@ function selectNew(db: Db, userId: number, types: ItemType[], limit: number) {
     .leftJoin(cardState, and(eq(cardState.itemId, items.id), eq(cardState.userId, userId)))
     .where(and(isNull(cardState.itemId), inArray(items.type, types)))
     .orderBy(asc(items.sortOrder))
-    .limit(limit)
     .all()
-    .map((r) => r.item);
+    .map((r) => r.item)
+    .filter((it) => !match || match(it))
+    .slice(0, limit);
+}
+
+/** Filter deck kana berdasarkan script atau jenis kartu (kata nyata). */
+function deckPredicate(deck?: KanaDeck) {
+  if (!deck || deck === 'all') return null;
+  return (it: ItemLite) => {
+    if (it.type !== 'kana') return false;
+    if (deck === 'word') return it.data.kind === 'word';
+    return it.data.script === deck;
+  };
 }
 
 export function computeState(db: Db, userId: number, now: Date = new Date()) {
@@ -115,14 +137,9 @@ export function computeState(db: Db, userId: number, now: Date = new Date()) {
   };
 }
 
-function toCards(db: Db, ids: number[], isNew: boolean, allowed: ItemType[]): BatchCard[] {
+function toCards(rows: ItemLite[], ids: number[], isNew: boolean, pool: PoolItem[]): BatchCard[] {
   if (ids.length === 0) return [];
-  const byId = new Map(db.select().from(items).where(inArray(items.id, ids)).all().map((i) => [i.id, i]));
-  const pool: PoolItem[] = db
-    .select({ id: items.id, type: items.type, data: items.data })
-    .from(items)
-    .where(inArray(items.type, allowed))
-    .all();
+  const byId = new Map(rows.map((i) => [i.id, i]));
 
   return ids.flatMap((id) => {
     const it = byId.get(id);
@@ -143,48 +160,75 @@ function toCards(db: Db, ids: number[], isNew: boolean, allowed: ItemType[]): Ba
  * Pilih batch berikutnya. Tidak ada batas harian atau batas sesi:
  *  1. ada yang jatuh tempo (learning dulu, lalu review terlemah) -> kerjakan itu
  *  2. antrean kosong dan gerbang adaptif terbuka -> kartu baru (batch kecil)
- *  3. selain itu -> tunggu (user bisa memaksa 'new' atau 'ahead')
+ *  3. deck kana tidak pernah habis -> ulangi kartu yang sudah dilihat (kind 'drill')
+ *  4. selain itu -> tunggu (user bisa memaksa 'new' atau 'ahead')
  *
  * `focus` membatasi ke satu jenis (kana/vocab/kanji/grammar) dan melewati gerbang
  * karena user secara sadar memilih deck tersebut.
+ * `deck` menyaring deck kana lebih lanjut (script atau kata nyata).
  */
 export function nextBatch(
   db: Db,
   userId: number,
-  opts: { mode?: Mode; now?: Date; focus?: StudyType } = {},
+  opts: { mode?: Mode; now?: Date; focus?: StudyType; deck?: KanaDeck } = {},
 ) {
   const now = opts.now ?? new Date();
   const mode = opts.mode ?? 'auto';
   const st = computeState(db, userId, now);
   const allowed: ItemType[] = opts.focus ? [opts.focus] : st.unlocked;
+  const match = deckPredicate(opts.deck);
+
+  const allRows = db
+    .select({ id: items.id, type: items.type, data: items.data })
+    .from(items)
+    .where(inArray(items.type, allowed))
+    .all();
+  const rows = match ? allRows.filter(match) : allRows;
+  const pool: PoolItem[] = rows.map((r) => ({ id: r.id, type: r.type, data: r.data }));
+  const allowedIds = new Set(rows.map((r) => r.id));
+
   const base = {
     young: st.young,
     youngLimit: st.limit,
     accuracy: st.accuracy,
     dueCount: st.learning.length + st.reviews.length,
     nextDueAt: st.nextDueAt,
-    newAvailable: st.newAvailable,
+    newAvailable: selectNew(db, userId, allowed, 1, match).length > 0,
     pace: st.pace,
     focus: opts.focus ?? null,
+    deck: opts.deck ?? null,
   };
 
-  const allowedIds = new Set(
-    db
-      .select({ id: items.id, type: items.type })
-      .from(items)
-      .where(inArray(items.type, allowed))
-      .all()
-      .map((r) => r.id),
-  );
-
-  if (mode === 'ahead') {
-    const ahead = st.rows
-      .filter((r) => r.due > now && allowedIds.has(r.itemId))
+  // Kartu yang paling lemah (retrievability terendah) lebih dulu.
+  const weakestSeen = (limit: number, onlyFuture = false) =>
+    st.rows
+      .filter((r) => allowedIds.has(r.itemId) && (!onlyFuture || r.due > now))
       .map((r) => ({ r, ret: retrievability(r, now) }))
       .sort((a, b) => a.ret - b.ret)
-      .slice(0, DUE_BATCH_SIZE)
+      .slice(0, limit)
       .map((x) => x.r.itemId);
-    return { ...base, kind: 'ahead' as const, reason: null, cards: toCards(db, ahead, false, allowed) };
+
+  if (mode === 'drill') {
+    return {
+      ...base,
+      kind: 'drill' as const,
+      reason: null,
+      cards: toCards(rows, weakestSeen(DUE_BATCH_SIZE), false, pool),
+    };
+  }
+
+  if (mode === 'ahead') {
+    const ahead = weakestSeen(DUE_BATCH_SIZE, true);
+    if (ahead.length === 0 && opts.focus === 'kana') {
+      // deck kana tidak pernah menunggu: ulang semua kartu yang sudah dilihat
+      return {
+        ...base,
+        kind: 'drill' as const,
+        reason: null,
+        cards: toCards(rows, weakestSeen(DUE_BATCH_SIZE), false, pool),
+      };
+    }
+    return { ...base, kind: 'ahead' as const, reason: null, cards: toCards(rows, ahead, false, pool) };
   }
 
   if (mode === 'auto' || opts.focus) {
@@ -193,7 +237,7 @@ export function nextBatch(
       .slice(0, DUE_BATCH_SIZE)
       .map((r) => r.itemId);
     if (dueIds.length > 0) {
-      return { ...base, kind: 'due' as const, reason: null, cards: toCards(db, dueIds, false, allowed) };
+      return { ...base, kind: 'due' as const, reason: null, cards: toCards(rows, dueIds, false, pool) };
     }
   }
 
@@ -201,24 +245,35 @@ export function nextBatch(
     // saat gerbang terbuka, jangan melampaui sisa ruang; mode 'new'/fokus selalu satu batch penuh
     const room =
       mode === 'new' || opts.focus ? NEW_BATCH_SIZE : Math.max(1, Math.min(NEW_BATCH_SIZE, st.limit - st.young));
-    const fresh = selectNew(db, userId, allowed, room);
+    const fresh = selectNew(db, userId, allowed, room, match);
     if (fresh.length > 0) {
       return {
         ...base,
         kind: 'new' as const,
         reason: null,
         cards: toCards(
-          db,
+          rows,
           fresh.map((it) => it.id),
           true,
-          allowed,
+          pool,
         ),
       };
     }
   }
 
-  const reason = !st.newAvailable
-    ? 'Semua kartu yang terbuka sudah diperkenalkan. Selesaikan fase ini sampai stabil untuk membuka fase berikutnya.'
-    : 'Kartu baru ditahan sementara supaya yang sudah dipelajari mengendap dulu.';
+  // Deck kana sengaja tanpa batas: setelah semua kartu diperkenalkan, ulangi terus.
+  if (opts.focus === 'kana') {
+    const ids = weakestSeen(DUE_BATCH_SIZE);
+    if (ids.length > 0) {
+      return { ...base, kind: 'drill' as const, reason: null, cards: toCards(rows, ids, false, pool) };
+    }
+  }
+
+  const reason =
+    opts.focus === 'kana'
+      ? 'Belum ada kartu kana untuk deck ini. Jalankan seed konten terlebih dahulu.'
+      : !st.newAvailable
+        ? 'Semua kartu yang terbuka sudah diperkenalkan. Selesaikan fase ini sampai stabil untuk membuka fase berikutnya.'
+        : 'Kartu baru ditahan sementara supaya yang sudah dipelajari mengendap dulu.';
   return { ...base, kind: 'wait' as const, reason, cards: [] as BatchCard[] };
 }

@@ -35,6 +35,22 @@ describe('buildExercise', () => {
     expect(ex.answer).toBe('a');
   });
 
+  it('kana kata nyata memakai latihan membaca dengan jawaban longgar', () => {
+    const ex = buildExercise(
+      {
+        id: 100,
+        type: 'kana',
+        data: { kind: 'word', word: 'コーヒー', romaji: 'koohii', meaning: 'kopi', script: 'katakana' },
+      },
+      pool,
+    );
+    expect(ex.kind).toBe('typing');
+    expect(ex.prompt).toBe('コーヒー');
+    expect(ex.answer).toBe('koohii');
+    expect(ex.loose).toBe(true);
+    expect(ex.hint).toBe('kopi');
+  });
+
   it('kosakata selalu punya 4 pilihan dan jawaban ada di dalamnya', () => {
     for (const item of pool.filter((p) => p.type === 'vocab')) {
       const ex = buildExercise(item, pool);

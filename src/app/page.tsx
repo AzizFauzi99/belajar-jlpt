@@ -153,7 +153,7 @@ export default function Home() {
             studyHref="/study?focus=kana"
             value={stats.byType.kana.learned}
             total={stats.byType.kana.total}
-            note="Hiragana dan katakana dasar."
+            note="Hiragana, katakana, dan kata nyata. Latihan tanpa batas."
           />
           <SkillCard
             title="Kosakata"

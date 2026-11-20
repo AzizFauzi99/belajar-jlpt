@@ -2,8 +2,9 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { checkRomaji, ratingFor } from '@/lib/answer';
+import { checkRomaji, checkWordRomaji, ratingFor } from '@/lib/answer';
 import type { Exercise, StudyType } from '@/lib/exercise';
+import type { KanaDeck } from '@/lib/next';
 
 type Card = {
   itemId: number;
@@ -14,7 +15,7 @@ type Card = {
 };
 type Batch = {
   cards: Card[];
-  kind: 'due' | 'new' | 'ahead' | 'wait';
+  kind: 'due' | 'new' | 'ahead' | 'drill' | 'wait';
   reason: string | null;
   nextDueAt: string | null;
   newAvailable: boolean;
@@ -22,10 +23,21 @@ type Batch = {
   youngLimit: number;
 };
 type Phase = 'loading' | 'learn' | 'quiz' | 'feedback' | 'wait' | 'done';
-type Mode = 'auto' | 'new' | 'ahead';
+type Mode = 'auto' | 'new' | 'ahead' | 'drill';
 
 const RATING_LABEL: Record<number, string> = { 1: 'Lagi', 2: 'Sulit', 3: 'Bagus', 4: 'Mudah' };
-const KIND_LABEL: Record<string, string> = { due: 'Review', new: 'Kartu baru', ahead: 'Latihan ekstra' };
+const KIND_LABEL: Record<string, string> = {
+  due: 'Review',
+  new: 'Kartu baru',
+  ahead: 'Latihan ekstra',
+  drill: 'Latihan ulang',
+};
+const DECK_LABEL: Record<KanaDeck, string> = {
+  all: 'Semua kana',
+  hiragana: 'Hiragana',
+  katakana: 'Katakana',
+  word: 'Kata nyata',
+};
 const TYPE_LABEL: Record<string, string> = {
   kana: 'Kana',
   vocab: 'Kosakata',
@@ -70,6 +82,18 @@ function CardDetail({ card }: { card: Card }) {
   const { type, data } = card;
 
   if (type === 'kana') {
+    if (data.kind === 'word') {
+      return (
+        <>
+          <div className="text-sm uppercase tracking-wide text-stone-500">
+            {String(data.script)} · kata nyata · {String(data.category ?? '')}
+          </div>
+          <div className="my-6 text-7xl font-semibold">{String(data.word)}</div>
+          <div className="text-3xl font-semibold">{String(data.romaji)}</div>
+          <div className="mt-2 text-lg text-stone-500">{String(data.meaning)}</div>
+        </>
+      );
+    }
     return (
       <>
         <div className="text-sm uppercase tracking-wide text-stone-500">
@@ -143,10 +167,11 @@ function CardDetail({ card }: { card: Card }) {
   return <div className="text-2xl">{String(data.title ?? '')}</div>;
 }
 
-export default function Study({ focus }: { focus?: StudyType }) {
+export default function Study({ focus, initialDeck }: { focus?: StudyType; initialDeck?: KanaDeck }) {
   const [queue, setQueue] = useState<Card[]>([]);
   const [idx, setIdx] = useState(0);
   const [kind, setKind] = useState<Batch['kind']>('due');
+  const [deck, setDeck] = useState<KanaDeck>(initialDeck ?? 'all');
   const [wait, setWait] = useState<Batch | null>(null);
   const [phase, setPhase] = useState<Phase>('loading');
   const [input, setInput] = useState('');
@@ -166,6 +191,7 @@ export default function Study({ focus }: { focus?: StudyType }) {
       try {
         const qs = new URLSearchParams({ mode });
         if (focus) qs.set('focus', focus);
+        if (focus === 'kana') qs.set('deck', deck);
         const res = await fetch(`/api/next?${qs}`);
         if (!res.ok) throw new Error();
         const b: Batch = await res.json();
@@ -185,7 +211,7 @@ export default function Study({ focus }: { focus?: StudyType }) {
         setError('Gagal memuat kartu berikutnya.');
       }
     },
-    [focus],
+    [focus, deck],
   );
 
   useEffect(() => {
@@ -256,7 +282,8 @@ export default function Study({ focus }: { focus?: StudyType }) {
   function submitTyping() {
     if (!card || !ex || input.trim() === '') return;
     const ms = Date.now() - startRef.current;
-    record(checkRomaji(input, ex.answer), ms, `${card.type}-type-answer`);
+    const correct = ex.loose ? checkWordRomaji(input, ex.answer) : checkRomaji(input, ex.answer);
+    record(correct, ms, `${card.type}-type-answer`);
   }
 
   function submitMcq(option: string) {
@@ -310,6 +337,26 @@ export default function Study({ focus }: { focus?: StudyType }) {
           ))}
         </div>
       )}
+      {phase !== 'done' && focus === 'kana' && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-stone-500">Deck:</span>
+            {(['all', 'hiragana', 'katakana', 'word'] as KanaDeck[]).map((d) => (
+              <button
+                key={d}
+                onClick={() => setDeck(d)}
+                className={`rounded-full border px-3 py-1 ${deck === d ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-stone-300 text-stone-600 dark:border-stone-700 dark:text-stone-300'}`}
+              >
+                {DECK_LABEL[d]}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-stone-500">
+            Latihan kana tanpa batas: setelah semua kartu diperkenalkan, kartu akan terus diulang sebagai review.
+          </p>
+        </div>
+      )}
+
       {phase === 'loading' && !error && <p className="py-16 text-center text-stone-500">Memuat…</p>}
 
       {phase === 'wait' && wait && (
@@ -388,6 +435,7 @@ export default function Study({ focus }: { focus?: StudyType }) {
                       Dinilai: {RATING_LABEL[result.rating]}
                       {!result.correct && ' · akan ditanya lagi'}
                     </div>
+                    {ex.hint && <div className="mt-1 text-sm text-stone-500">{ex.hint}</div>}
                     <div className="mt-5 flex justify-center gap-3">
                       <button onClick={() => speak(ex.prompt)} className={ghost}>🔊</button>
                       <button onClick={next} className={btn}>Lanjut (Enter)</button>

@@ -26,7 +26,12 @@ function setup(kana = 60, vocab = 0) {
   return { db, userId: user.id, kanaIds, vocabIds };
 }
 
-const learn = (s: ReturnType<typeof setup>, ids: number[], at: Date, rating: Rating.Good | Rating.Again | Rating.Easy = Rating.Good) => {
+const learn = (
+  s: { db: ReturnType<typeof createDb>['db']; userId: number },
+  ids: number[],
+  at: Date,
+  rating: Rating.Good | Rating.Again | Rating.Easy = Rating.Good,
+) => {
   for (const id of ids) recordReview(s.db, { userId: s.userId, itemId: id, rating, exerciseType: 'x', now: at });
 };
 
@@ -104,6 +109,65 @@ describe('nextBatch', () => {
     const b = nextBatch(s.db, s.userId, { now: mins(1), mode: 'ahead' });
     expect(b.kind).toBe('ahead');
     expect(b.cards[0].itemId).toBe(s.kanaIds[1]);
+  });
+});
+
+describe('deck kana tanpa batas', () => {
+  function setupKanaData() {
+    const { db } = createDb(':memory:');
+    const user = db.insert(users).values({ name: 'test' }).returning().get();
+    db.insert(settings).values({ userId: user.id }).run();
+    const add = (key: string, data: Record<string, unknown>, sortOrder: number) =>
+      db.insert(items).values({ type: 'kana', level: 'N5', key, data, sortOrder }).returning().get().id;
+    const hira = add('あ', { char: 'あ', romaji: 'a', script: 'hiragana', group: 'vowels' }, 1);
+    const kata = add('カ', { char: 'カ', romaji: 'ka', script: 'katakana', group: 'k' }, 2);
+    const hiraWord = add(
+      'word:ねこ',
+      { kind: 'word', word: 'ねこ', romaji: 'neko', meaning: 'kucing', script: 'hiragana' },
+      3,
+    );
+    const kataWord = add(
+      'word:コーヒー',
+      { kind: 'word', word: 'コーヒー', romaji: 'koohii', meaning: 'kopi', script: 'katakana' },
+      4,
+    );
+    return { db, userId: user.id, hira, kata, hiraWord, kataWord };
+  }
+
+  it('deck kana tidak pernah menunggu: kartu yang sudah dilihat diulang terus', () => {
+    const s = setup(10);
+    learn(s, s.kanaIds, T0);
+    for (let i = 0; i < 3; i++) {
+      const b = nextBatch(s.db, s.userId, { now: T0, focus: 'kana' });
+      expect(b.kind).toBe('drill');
+      expect(b.cards.length).toBeGreaterThan(0);
+      expect(b.cards.every((c) => !c.isNew)).toBe(true);
+    }
+  });
+
+  it('deck kata nyata hanya menyajikan kata, bukan karakter', () => {
+    const s = setupKanaData();
+    const b = nextBatch(s.db, s.userId, { now: T0, focus: 'kana', deck: 'word' });
+    expect(b.kind).toBe('new');
+    expect(b.cards).toHaveLength(2);
+    expect(b.cards.every((c) => c.data.kind === 'word')).toBe(true);
+  });
+
+  it('deck hiragana dan katakana menyaring sesuai script', () => {
+    const s = setupKanaData();
+    const hira = nextBatch(s.db, s.userId, { now: T0, focus: 'kana', deck: 'hiragana' });
+    expect(hira.cards.every((c) => c.data.script === 'hiragana')).toBe(true);
+    const kata = nextBatch(s.db, s.userId, { now: T0, focus: 'kana', deck: 'katakana' });
+    expect(kata.cards.every((c) => c.data.script === 'katakana')).toBe(true);
+  });
+
+  it('setelah semua kata dilihat, deck kata nyata tetap mengulang kata itu', () => {
+    const s = setupKanaData();
+    learn(s, [s.hiraWord, s.kataWord], T0);
+    const b = nextBatch(s.db, s.userId, { now: T0, focus: 'kana', deck: 'word' });
+    expect(b.kind).toBe('drill');
+    expect(b.cards).toHaveLength(2);
+    expect(b.cards.every((c) => c.data.kind === 'word')).toBe(true);
   });
 });
 
